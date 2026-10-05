@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FlowCast — Traffic Congestion Detection &amp; Prediction</title>
+<meta name="description" content="Demo-mode traffic congestion detection, hotspot analytics and short-term forecasting dashboard." />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+/* ============================================================
+   FlowCast — Design System
+   ============================================================ */
+:root{
+  --bg:#070b14; --bg2:#0b1220; --bg3:#0e1626;
+  --panel:rgba(255,255,255,.045); --panel2:rgba(255,255,255,.075);
+  --border:rgba(255,255,255,.10); --border2:rgba(255,255,255,.16);
+  --text:#e9eef8; --muted:#94a3b8; --muted2:#64748b;
+  --accent:#38e1ff; --accent2:#7c5cff;
+  --ok:#22c55e; --warn:#eab308; --high:#f97316; --sev:#ef4444;
+  --radius:16px; --radius-sm:10px;
+  --shadow:0 12px 40px rgba(0,0,0,.45);
+  --sidebar:264px;
+}
+html[data-theme="light"]{
+  --bg:#f4f7fb; --bg2:#eaf0f8; --bg3:#ffffff;
+  --panel:rgba(255,255,255,.75); --panel2:rgba(255,255,255,.95);
+  --border:rgba(15,23,42,.10); --border2:rgba(15,23,42,.18);
+  --text:#0f172a; --muted:#475569; --muted2:#64748b;
+  --shadow:0 12px 36px rgba(15,23,42,.12);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  background:var(--bg); color:var(--text); min-height:100vh;
+  -webkit-font-smoothing:antialiased; line-height:1.5;
+}
+a{color:var(--accent); text-decoration:none}
+button{font:inherit; cursor:pointer}
+input,select,textarea{font:inherit}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:6px}
+h1,h2,h3,h4{margin:0 0 .5rem; line-height:1.2; letter-spacing:-.02em}
+p{margin:0 0 1rem; color:var(--muted)}
+small{color:var(--muted)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:rgba(148,163,184,.28);border-radius:8px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ---------- Animated background ---------- */
+#bg{position:fixed; inset:0; z-index:0; overflow:hidden; pointer-events:none}
+#bg .grad{
+  position:absolute; inset:-20%;
+  background:
+    radial-gradient(900px 600px at 12% 8%, rgba(56,225,255,.16), transparent 60%),
+    radial-gradient(800px 700px at 88% 22%, rgba(124,92,255,.16), transparent 60%),
+    radial-gradient(1000px 800px at 50% 100%, rgba(56,225,255,.08), transparent 60%),
+    linear-gradient(160deg,var(--bg) 0%,var(--bg2) 55%,var(--bg3) 100%);
+}
+#bg svg{position:absolute; inset:0; width:100%; height:100%; opacity:.5}
+#bg .grid-line{stroke:rgba(148,163,184,.13); stroke-width:1}
+#bg .route{stroke:rgba(56,225,255,.30); stroke-width:1.4; fill:none; stroke-dasharray:8 12; animation:dash 14s linear infinite}
+#bg .node{fill:rgba(56,225,255,.85); filter:drop-shadow(0 0 6px rgba(56,225,255,.9)); animation:pulse 4s ease-in-out infinite}
+@keyframes dash{to{stroke-dashoffset:-400}}
+@keyframes pulse{0%,100%{opacity:.55;r:3}50%{opacity:1;r:5}}
+@media (prefers-reduced-motion: reduce){
+  #bg .route,#bg .node{animation:none}
+  *{transition:none !important}
+}
+
+/* ---------- Layout ---------- */
+#appShell{position:relative; z-index:1; display:flex; min-height:100vh}
+#sidebar{
+  width:var(--sidebar); flex:0 0 var(--sidebar);
+  background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,.02));
+  border-right:1px solid var(--border);
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  display:flex; flex-direction:column; padding:18px 14px; position:sticky; top:0; height:100vh;
+}
+.brand{display:flex; align-items:center; gap:10px; padding:6px 8px 16px}
+.brand .logo{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2)); box-shadow:0 0 22px rgba(56,225,255,.45)}
+.brand .logo svg{width:20px;height:20px}
+.brand b{font-size:1.02rem; letter-spacing:-.02em}
+.brand small{display:block; font-size:.68rem; color:var(--muted2); letter-spacing:.06em; text-transform:uppercase}
+.nav{display:flex; flex-direction:column; gap:4px; margin-top:6px}
+.nav button{
+  display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+  background:transparent; border:1px solid transparent; color:var(--muted);
+  padding:10px 12px; border-radius:12px; transition:.18s; font-size:.93rem;
+}
+.nav button:hover{background:var(--panel); color:var(--text)}
+.nav button.active{background:linear-gradient(90deg,rgba(56,225,255,.16),rgba(124,92,255,.10));
+  color:var(--text); border-color:var(--border2); box-shadow:inset 0 0 0 1px rgba(56,225,255,.10)}
+.nav button .ic{width:18px;height:18px;flex:0 0 18px;opacity:.9}
+.sidebar-foot{margin-top:auto; border-top:1px solid var(--border); padding-top:12px; font-size:.74rem; color:var(--muted2)}
+.mode-badge{display:inline-flex; align-items:center; gap:6px; background:rgba(234,179,8,.14);
+  border:1px solid rgba(234,179,8,.4); color:#fde68a; border-radius:999px; padding:3px 9px; font-size:.68rem; font-weight:600; letter-spacing:.04em}
+html[data-theme="light"] .mode-badge{color:#92400e}
+
+.main{flex:1; min-width:0; display:flex; flex-direction:column}
+#topbar{
+  display:flex; align-items:center; gap:12px; padding:12px 20px;
+  border-bottom:1px solid var(--border); position:sticky; top:0; z-index:20;
+  background:rgba(7,11,20,.72); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+}
+html[data-theme="light"] #topbar{background:rgba(244,247,251,.82)}
+#topbar h2{margin:0; font-size:1.02rem}
+#topbar .sub{font-size:.75rem; color:var(--muted2)}
+.spacer{flex:1}
+.icon-btn{background:var(--panel); border:1px solid var(--border); color:var(--text);
+  width:38px;height:38px;border-radius:11px; display:grid; place-items:center; transition:.18s}
+.icon-btn:hover{background:var(--panel2); border-color:var(--border2)}
+.icon-btn svg{width:18px;height:18px}
+#menuBtn{display:none}
+.user-chip{display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border);
+  padding:5px 12px 5px 5px; border-radius:999px}
+.avatar{width:28px;height:28px;border-radius:50%; display:grid; place-items:center; font-size:.76rem; font-weight:700;
+  background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#04121a}
+.user-chip span{font-size:.82rem}
+
+#views{padding:22px; max-width:1400px; width:100%}
+.view{display:none; animation:fade .35s ease}
+.view.active{display:block}
+@keyframes fade{from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none}}
+#appShell.guest-mode .main{width:100%; min-height:100vh}
+#appShell.guest-mode #views{max-width:none; padding:clamp(16px,3vw,40px)}
+#appShell.guest-mode #view-home{width:min(100%,1600px); margin-inline:auto}
+
+/* ---------- Components ---------- */
+.card{
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); box-shadow:var(--shadow);
+  padding:18px; margin-bottom:16px;
+}
+.card h3{font-size:1rem; display:flex; align-items:center; gap:8px}
+.card .card-sub{font-size:.78rem; color:var(--muted2); margin:-2px 0 14px}
+.grid{display:grid; gap:16px}
+.g-4{grid-template-columns:repeat(4,1fr)}
+.g-3{grid-template-columns:repeat(3,1fr)}
+.g-2{grid-template-columns:repeat(2,1fr)}
+.g-2-1{grid-template-columns:2fr 1fr}
+@media(max-width:1100px){.g-4{grid-template-columns:repeat(2,1fr)} .g-3{grid-template-columns:repeat(2,1fr)} .g-2-1{grid-template-columns:1fr}}
+@media(max-width:720px){.g-4,.g-3,.g-2,.g-2-1{grid-template-columns:1fr}}
+
+.kpi{position:relative; overflow:hidden}
+.kpi .label{font-size:.74rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted2)}
+.kpi .value{font-size:2rem; font-weight:700; letter-spacing:-.03em; margin:6px 0 2px; font-variant-numeric:tabular-nums}
+.kpi .delta{font-size:.78rem}
+.kpi .glow{position:absolute; right:-30px; top:-30px; width:120px; height:120px; border-radius:50%;
+  background:radial-gradient(circle,rgba(56,225,255,.28),transparent 70%); pointer-events:none}
+.up{color:var(--sev)} .down{color:var(--ok)} .flat{color:var(--muted)}
+
+.btn{display:inline-flex; align-items:center; gap:8px; background:var(--panel2); color:var(--text);
+  border:1px solid var(--border2); padding:10px 16px; border-radius:12px; transition:.18s; font-size:.88rem}
+.btn:hover{transform:translateY(-1px); border-color:var(--accent)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#04121a; font-weight:650; border-color:transparent;
+  box-shadow:0 8px 26px rgba(56,225,255,.28)}
+.btn.ghost{background:transparent}
+.btn.sm{padding:7px 12px; font-size:.8rem}
+.btn.danger{background:rgba(239,68,68,.16); border-color:rgba(239,68,68,.5); color:#fca5a5}
+.btn:disabled{opacity:.5; cursor:not-allowed; transform:none}
+
+.field{margin-bottom:14px}
+.field label{display:block; font-size:.78rem; color:var(--muted); margin-bottom:6px; font-weight:550}
+.field input,.field select,.field textarea{
+  width:100%; background:rgba(255,255,255,.05); border:1px solid var(--border);
+  color:var(--text); padding:11px 13px; border-radius:11px; transition:.18s;
+}
+html[data-theme="light"] .field input,html[data-theme="light"] .field select,html[data-theme="light"] .field textarea{background:#fff}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent); outline:none; box-shadow:0 0 0 3px rgba(56,225,255,.14)}
+.field .err{color:#fca5a5; font-size:.75rem; margin-top:5px; display:none}
+.field.invalid input,.field.invalid select{border-color:var(--sev)}
+.field.invalid .err{display:block}
+.row{display:flex; gap:12px; flex-wrap:wrap}
+.row>*{flex:1; min-width:150px}
+
+table{width:100%; border-collapse:collapse; font-size:.85rem}
+th{text-align:left; color:var(--muted2); font-weight:600; font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; padding:9px 10px; border-bottom:1px solid var(--border)}
+td{padding:10px; border-bottom:1px solid var(--border)}
+tbody tr:hover{background:var(--panel)}
+tbody tr:last-child td{border-bottom:none}
+
+.pill{display:inline-flex; align-items:center; gap:5px; border-radius:999px; padding:3px 10px; font-size:.72rem; font-weight:650; letter-spacing:.03em}
+.pill::before{content:""; width:7px; height:7px; border-radius:50%; background:currentColor}
+.pill.LOW{background:rgba(34,197,94,.16); color:#4ade80; border:1px solid rgba(34,197,94,.4)}
+.pill.MODERATE{background:rgba(234,179,8,.16); color:#fde047; border:1px solid rgba(234,179,8,.4)}
+.pill.HIGH{background:rgba(249,115,22,.16); color:#fdba74; border:1px solid rgba(249,115,22,.4)}
+.pill.SEVERE{background:rgba(239,68,68,.18); color:#fca5a5; border:1px solid rgba(239,68,68,.45)}
+html[data-theme="light"] .pill.LOW{color:#15803d} html[data-theme="light"] .pill.MODERATE{color:#a16207}
+html[data-theme="light"] .pill.HIGH{color:#c2410c} html[data-theme="light"] .pill.SEVERE{color:#b91c1c}
+
+.legend{display:flex; gap:14px; flex-wrap:wrap; font-size:.78rem; color:var(--muted)}
+.legend i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-right:5px}
+
+.map-wrap{position:relative; height:420px; border-radius:14px; overflow:hidden; border:1px solid var(--border); background:#0a1220}
+html[data-theme="light"] .map-wrap{background:#dbe7f5}
+#map{width:100%; height:100%}
+.leaflet-container{background:transparent; font:inherit}
+
+.chart-wrap{position:relative; height:260px}
+.chart-wrap canvas{width:100%; height:100%; display:block}
+.chart-empty{display:grid; place-items:center; height:100%; color:var(--muted2); font-size:.85rem}
+
+.bar-list{display:flex; flex-direction:column; gap:10px}
+.bar-row{display:grid; grid-template-columns:130px 1fr 56px; gap:10px; align-items:center; font-size:.82rem}
+.bar-track{height:9px; border-radius:6px; background:rgba(148,163,184,.18); overflow:hidden}
+.bar-fill{height:100%; border-radius:6px; background:linear-gradient(90deg,var(--accent),var(--accent2)); transition:width .6s ease}
+.bar-val{text-align:right; color:var(--muted); font-variant-numeric:tabular-nums}
+
+/* ---------- Auth ---------- */
+.auth-screen{position:fixed; inset:0; z-index:60; display:grid; place-items:center; padding:20px;
+  background:linear-gradient(160deg,rgba(7,11,20,.94),rgba(11,18,32,.96)); backdrop-filter:blur(10px); overflow:auto}
+html[data-theme="light"] .auth-screen{background:linear-gradient(160deg,rgba(244,247,251,.96),rgba(234,240,248,.98))}
+.auth-card{width:100%; max-width:440px; background:var(--panel); border:1px solid var(--border2);
+  border-radius:20px; padding:30px; box-shadow:var(--shadow); backdrop-filter:blur(20px); margin:auto}
+.auth-card .brand{justify-content:center; padding-bottom:6px}
+.auth-card h1{font-size:1.45rem; text-align:center; margin-bottom:4px}
+.auth-card .lead{text-align:center; font-size:.85rem; margin-bottom:22px}
+.auth-tabs{display:flex; background:rgba(148,163,184,.12); border-radius:12px; padding:4px; margin-bottom:20px}
+.auth-tabs button{flex:1; background:transparent; border:none; color:var(--muted); padding:9px; border-radius:9px; font-size:.85rem; transition:.18s}
+.auth-tabs button.active{background:var(--panel2); color:var(--text); box-shadow:0 2px 10px rgba(0,0,0,.25)}
+.auth-panel{display:none} .auth-panel.active{display:block}
+.pw-wrap{position:relative}
+.pw-wrap .toggle{position:absolute; right:8px; top:50%; transform:translateY(-50%); background:transparent; border:none; color:var(--muted); font-size:.72rem; padding:6px 8px; border-radius:8px}
+.pw-wrap .toggle:hover{color:var(--text); background:var(--panel)}
+.pw-meter{height:5px; border-radius:4px; background:rgba(148,163,184,.2); margin-top:8px; overflow:hidden}
+.pw-meter i{display:block; height:100%; width:0; transition:width .3s, background .3s}
+.auth-alt{text-align:center; font-size:.82rem; margin-top:16px; color:var(--muted)}
+.auth-alt button{background:none;border:none;color:var(--accent);padding:0}
+.divider{display:flex; align-items:center; gap:12px; margin:18px 0; color:var(--muted2); font-size:.74rem}
+.divider::before,.divider::after{content:""; flex:1; height:1px; background:var(--border)}
+.notice{background:rgba(56,225,255,.08); border:1px solid rgba(56,225,255,.28); border-radius:12px;
+  padding:10px 13px; font-size:.78rem; color:var(--muted); margin-bottom:16px}
+.notice.warn{background:rgba(234,179,8,.10); border-color:rgba(234,179,8,.35)}
+
+/* ---------- Landing ---------- */
+.hero{min-height:min(620px,calc(100svh - 110px)); padding:clamp(52px,9vh,108px) 8px clamp(38px,7vh,72px); text-align:center; position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center}
+.hero .eyebrow{display:inline-flex; align-items:center; gap:8px; background:var(--panel); border:1px solid var(--border2);
+  border-radius:999px; padding:6px 14px; font-size:.76rem; color:var(--muted); margin-bottom:20px}
+.hero h1{font-size:clamp(2rem,4.4vw,3.3rem); max-width:900px; margin:0 auto 14px; letter-spacing:-.035em}
+.hero h1 .grad-text{background:linear-gradient(120deg,var(--accent),var(--accent2)); -webkit-background-clip:text; background-clip:text; color:transparent}
+.hero p{max-width:680px; margin:0 auto 26px; font-size:1.02rem}
+.cta-row{display:flex; gap:12px; justify-content:center; flex-wrap:wrap}
+.architecture-diagram{display:grid; gap:22px; width:100%; padding:10px 4px 4px}
+.architecture-flow{display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:24px}
+.architecture-node{position:relative; display:flex; min-width:0; min-height:112px; flex-direction:column; justify-content:center; gap:7px;
+  padding:16px; border:1px solid var(--border2); border-radius:14px; background:linear-gradient(145deg,rgba(56,225,255,.09),var(--panel));}
+.architecture-node:not(:last-child)::after{content:"→"; position:absolute; z-index:1; right:-22px; top:50%; transform:translate(50%,-50%); color:var(--accent); font-size:1.3rem; font-weight:700}
+.architecture-node small{color:var(--accent); font-size:.66rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase}
+.architecture-node b{font-size:.9rem; line-height:1.25}
+.architecture-node span{color:var(--muted); font-size:.75rem; line-height:1.4}
+.architecture-branches{border-top:1px dashed var(--border2); padding-top:16px}
+.architecture-branches>p{margin:0 0 12px; text-align:center; font-size:.74rem; color:var(--muted2)}
+.architecture-services{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px}
+.architecture-service{padding:13px 15px; border-radius:12px; border:1px solid var(--border); background:var(--panel); text-align:center}
+.architecture-service b{display:block; font-size:.82rem}
+.architecture-service span{color:var(--muted2); font-size:.72rem}
+.feature-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+@media(max-width:900px){.feature-grid{grid-template-columns:1fr}}
+.feature{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:20px; transition:.2s}
+.feature:hover{border-color:var(--border2); transform:translateY(-2px)}
+.feature .fi{width:38px;height:38px;border-radius:11px; display:grid; place-items:center; margin-bottom:12px;
+  background:linear-gradient(135deg,rgba(56,225,255,.22),rgba(124,92,255,.22)); border:1px solid var(--border2)}
+.feature h4{font-size:.95rem; margin-bottom:6px}
+.feature p{font-size:.85rem; margin:0}
+.steps{display:grid; grid-template-columns:repeat(4,1fr); gap:16px}
+@media(max-width:900px){.steps{grid-template-columns:1fr 1fr}}
+.step{background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:18px; position:relative}
+.step .n{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+  color:#04121a; display:grid; place-items:center; font-weight:700; font-size:.78rem; margin-bottom:10px}
+.step h4{font-size:.9rem; margin-bottom:4px}
+.step p{font-size:.8rem; margin:0}
+.faq details{border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:10px; background:var(--panel)}
+.faq summary{cursor:pointer; font-weight:600; font-size:.9rem}
+.faq p{margin:10px 0 0; font-size:.85rem}
+
+/* ---------- Toasts & modal ---------- */
+#toasts{position:fixed; right:18px; bottom:18px; z-index:90; display:flex; flex-direction:column; gap:10px; max-width:340px}
+.toast{background:var(--panel2); border:1px solid var(--border2); border-left:3px solid var(--accent);
+  border-radius:12px; padding:12px 14px; box-shadow:var(--shadow); backdrop-filter:blur(14px);
+  animation:slideIn .3s ease; font-size:.85rem}
+.toast.ok{border-left-color:var(--ok)} .toast.err{border-left-color:var(--sev)} .toast.warn{border-left-color:var(--warn)}
+.toast b{display:block; margin-bottom:2px}
+@keyframes slideIn{from{opacity:0; transform:translateX(20px)} to{opacity:1; transform:none}}
+
+.modal-back{position:fixed; inset:0; z-index:80; background:rgba(3,6,12,.7); backdrop-filter:blur(4px);
+  display:grid; place-items:center; padding:20px}
+.modal{background:var(--bg2); border:1px solid var(--border2); border-radius:18px; padding:24px; max-width:520px; width:100%; box-shadow:var(--shadow)}
+html[data-theme="light"] .modal{background:#fff}
+
+.spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#04121a;
+  border-radius:50%;animation:spin .7s linear infinite; display:inline-block}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-overlay{position:absolute; inset:0; display:grid; place-items:center; background:rgba(7,11,20,.55); border-radius:14px; z-index:5}
+html[data-theme="light"] .loading-overlay{background:rgba(244,247,251,.7)}
+
+.stat-strip{display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:20px; padding:18px 20px; border-radius:var(--radius);
+  background:var(--panel); border:1px solid var(--border)}
+.stat-strip div b{display:block; font-size:1.25rem; font-variant-numeric:tabular-nums}
+.stat-strip div span{font-size:.74rem; color:var(--muted2); text-transform:uppercase; letter-spacing:.06em}
+
+.badge-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.76rem; background:rgba(148,163,184,.14);
+  border:1px solid var(--border); padding:2px 7px; border-radius:6px; color:var(--muted)}
+pre{background:rgba(2,6,14,.6); border:1px solid var(--border); border-radius:12px; padding:14px; overflow:auto; font-size:.8rem}
+html[data-theme="light"] pre{background:#0f172a; color:#e2e8f0}
+.endpoint{display:flex; gap:10px; align-items:center; padding:9px 0; border-bottom:1px solid var(--border); font-size:.84rem}
+.endpoint:last-child{border-bottom:none}
+.verb{font-weight:700; font-size:.72rem; padding:2px 8px; border-radius:6px; min-width:52px; text-align:center}
+.verb.GET{background:rgba(34,197,94,.18); color:#4ade80}
+.verb.POST{background:rgba(56,225,255,.18); color:#67e8f9}
+.hidden{display:none !important}
+
+@media(max-width:900px){
+  #sidebar{position:fixed; left:0; top:0; z-index:50; transform:translateX(-102%); transition:transform .25s ease}
+  #sidebar.open{transform:none; box-shadow:var(--shadow)}
+  #menuBtn{display:grid}
+  #views{padding:16px}
+  .user-chip span{display:none}
+}
+@media(max-width:900px){
+  .architecture-flow{grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px}
+  .architecture-node{min-height:104px; padding:13px}
+  .architecture-node:not(:last-child)::after{content:none}
+  .architecture-services{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:560px){
+  #appShell.guest-mode #views{padding:12px}
+  .hero{min-height:auto; padding:64px 6px 44px}
+  .hero .eyebrow{font-size:.68rem; padding:6px 10px}
+  .hero h1{font-size:clamp(2rem,10vw,2.7rem)}
+  .hero p{font-size:.92rem}
+  .stat-strip{grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px 10px; padding:16px}
+  .stat-strip div:last-child{grid-column:1/-1}
+  .stat-strip div span{font-size:.66rem; letter-spacing:.04em}
+  .architecture-flow{grid-template-columns:1fr; gap:10px}
+  .architecture-node{min-height:unset; padding:14px}
+  .architecture-node:not(:last-child)::after{content:"↓"; display:block; top:auto; right:50%; bottom:-18px; transform:translate(50%,50%); font-size:1rem}
+  .architecture-services{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+
+<!-- ======================= ANIMATED BACKGROUND ======================= -->
+<div id="bg" aria-hidden="true">
+  <div class="grad"></div>
+  <svg viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice">
+    <g>
+      <path class="grid-line" d="M0 120H1200M0 260H1200M0 400H1200M0 540H1200M0 680H1200"/>
+      <path class="grid-line" d="M150 0V800M400 0V800M650 0V800M900 0V800M1100 0V800"/>
+    </g>
+    <path class="route" d="M0 660 C 200 620, 280 420, 480 400 S 820 380, 1000 220 L 1200 180"/>
+    <path class="route" d="M120 800 C 180 600, 320 520, 420 300 S 620 120, 780 60"/>
+    <path class="route" d="M1000 800 C 940 640, 800 560, 700 400 S 560 200, 640 0"/>
+    <g>
+      <circle class="node" cx="480" cy="400" r="4"/>
+      <circle class="node" cx="780" cy="230" r="4" style="animation-delay:1s"/>
+      <circle class="node" cx="320" cy="520" r="4" style="animation-delay:2s"/>
+      <circle class="node" cx="700" cy="400" r="4" style="animation-delay:3s"/>
+      <circle class="node" cx="1000" cy="220" r="4" style="animation-delay:1.5s"/>
+    </g>
+  </svg>
+</div>
+
+<!-- ======================= AUTH SCREEN ======================= -->
+<div id="authScreen" class="auth-screen">
+  <div class="auth-card">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#04121a" stroke-width="2.2" stroke-linecap="round">
+          <path d="M4 18h16M7 18V8l5-4 5 4v10"/><circle cx="12" cy="13" r="2"/>
+        </svg>
+      </div>
+      <div><b>FlowCast</b><small>Traffic Intelligence</small></div>
+    </div>
+
+    <div class="auth-alt"><button type="button" id="authBackBtn">← Back to Calabar overview</button></div>
+    <h1 id="authTitle">Welcome back</h1>
+    <p class="lead" id="authLead">Sign in to the congestion detection &amp; prediction dashboard.</p>
+
+    <div class="notice warn" id="authGateNote" hidden>
+      That area requires a session. Sign in to your account or create one.
+    </div>
+
+    <div class="auth-tabs" role="tablist">
+      <button id="tabSignin" class="active" role="tab" aria-selected="true">Sign in</button>
+      <button id="tabSignup" role="tab" aria-selected="false">Create account</button>
+    </div>
+
+    <!-- SIGN IN -->
+    <form id="panelSignin" class="auth-panel active" novalidate>
+      <div class="field" id="f_si_email">
+        <label for="si_email">Email address</label>
+        <input id="si_email" type="email" autocomplete="email" placeholder="you@university.edu" />
+        <div class="err">Enter a valid email address.</div>
+      </div>
+      <div class="field" id="f_si_password">
+        <label for="si_password">Password</label>
+        <div class="pw-wrap">
+          <input id="si_password" type="password" autocomplete="current-password" placeholder="••••••••" />
+          <button type="button" class="toggle" data-toggle="si_password">Show</button>
+        </div>
+        <div class="err">Password is required.</div>
+      </div>
+      <div class="row" style="align-items:center; justify-content:space-between; margin-bottom:14px">
+        <label style="display:flex; align-items:center; gap:8px; font-size:.8rem; color:var(--muted)">
+          <input id="si_remember" type="checkbox" checked style="width:auto" /> Remember me
+        </label>
+        <button type="button" id="linkForgot" style="background:none;border:none;color:var(--accent);font-size:.8rem;padding:0">Forgot password?</button>
+      </div>
+      <button type="submit" class="btn primary" style="width:100%; justify-content:center" id="si_submit">Sign in</button>
+    </form>
+
+    <!-- SIGN UP -->
+    <form id="panelSignup" class="auth-panel" novalidate>
+      <div class="field" id="f_su_name">
+        <label for="su_name">Full name</label>
+        <input id="su_name" type="text" autocomplete="name" placeholder="Ada Lovelace" />
+        <div class="err">Please enter your name.</div>
+      </div>
+      <div class="field" id="f_su_email">
+        <label for="su_email">Email address</label>
+        <input id="su_email" type="email" autocomplete="email" placeholder="you@university.edu" />
+        <div class="err">Enter a valid email address.</div>
+      </div>
+      <div class="field" id="f_su_password">
+        <label for="su_password">Password</label>
+        <div class="pw-wrap">
+          <input id="su_password" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+          <button type="button" class="toggle" data-toggle="su_password">Show</button>
+        </div>
+        <div class="pw-meter"><i id="pwMeter"></i></div>
+        <div class="err">Use at least 8 characters.</div>
+      </div>
+      <div class="field" id="f_su_confirm">
+        <label for="su_confirm">Confirm password</label>
+        <input id="su_confirm" type="password" autocomplete="new-password" placeholder="Re-enter password" />
+        <div class="err">Passwords do not match.</div>
+      </div>
+      <div class="field" id="f_su_terms">
+        <label style="display:flex; align-items:flex-start; gap:8px; font-weight:400">
+          <input id="su_terms" type="checkbox" style="width:auto; margin-top:3px" />
+          <span>I understand this is a university demo prototype running on synthetic data.</span>
+        </label>
+        <div class="err">Please acknowledge to continue.</div>
+      </div>
+      <button type="submit" class="btn primary" style="width:100%; justify-content:center" id="su_submit">Create account</button>
+    </form>
+
+    <!-- FORGOT -->
+    <form id="panelForgot" class="auth-panel" novalidate>
+      <div class="notice">Password reset is simulated in Demo Mode. No email is sent and nothing leaves your browser.</div>
+      <div class="field" id="f_fp_email">
+        <label for="fp_email">Account email</label>
+        <input id="fp_email" type="email" placeholder="you@university.edu" />
+        <div class="err">Enter a valid email address.</div>
+      </div>
+      <button type="submit" class="btn primary" style="width:100%; justify-content:center" id="fp_submit">Send reset link</button>
+      <div class="auth-alt"><button type="button" id="linkBackSignin">← Back to sign in</button></div>
+    </form>
+
+    <div class="auth-alt" id="authFootNote">Demo build · synthetic data only · no live traffic feed connected</div>
+  </div>
+</div>
+
+<!-- ======================= APP SHELL ======================= -->
+<div id="appShell" class="hidden">
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#04121a" stroke-width="2.2" stroke-linecap="round">
+          <path d="M4 18h16M7 18V8l5-4 5 4v10"/><circle cx="12" cy="13" r="2"/>
+        </svg>
+      </div>
+      <div><b>FlowCast</b><small>Traffic Intelligence</small></div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button data-route="home" class="active">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg> Overview
+      </button>
+      <button data-route="dashboard" data-protected="1">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg> Dashboard
+      </button>
+      <button data-route="prediction" data-protected="1">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l5-6 4 3 5-8 4 5"/></svg> Prediction
+      </button>
+      <button data-route="analytics" data-protected="1">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg> Analytics
+      </button>
+      <button data-route="alerts" data-protected="1">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 10-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 21a2 2 0 01-3.4 0"/></svg> Alerts
+      </button>
+      <button data-route="data" data-protected="1">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg> Data
+      </button>
+      <button data-route="docs">
+        <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h11l5 5v11H4z"/><path d="M15 4v5h5"/></svg> Documentation
+      </button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="mode-badge">● DEMO MODE</div>
+      <p style="margin:8px 0 0; font-size:.72rem">Calabar South · Marian Road &amp; Ekpo Abasi Street · approximate demo locations, not live GPS or traffic data.</p>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header id="topbar">
+      <button class="icon-btn" id="menuBtn" aria-label="Toggle navigation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+      </button>
+      <div>
+        <h2 id="pageTitle">Home</h2>
+        <div class="sub" id="pageSub">Traffic congestion detection &amp; forecasting</div>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn sm" id="signInBtn" type="button" hidden>Sign in</button>
+      <button class="btn sm primary" id="createAccountBtn" type="button" hidden>Create account</button>
+      <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+      </button>
+      <div class="user-chip" id="userChip" title="Signed in" hidden>
+        <div class="avatar" id="avatar">?</div>
+        <span id="userName">User</span>
+      </div>
+      <button class="icon-btn" id="logoutBtn" title="Sign out" aria-label="Sign out" hidden>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5M21 12H9"/></svg>
+      </button>
+    </header>
+
+    <main id="views">
+
+      <!-- ============ HOME / LANDING ============ -->
+      <section class="view active" id="view-home">
+        <div class="hero">
+          <span class="eyebrow">● Calabar South · Traffic intelligence prototype</span>
+          <h1>See congestion sooner. <span class="grad-text">Plan the next move.</span></h1>
+          <p>Explore a traffic-monitoring prototype for Marian Road and Ekpo Abasi Street in Calabar South. Review congestion indicators, compare trends and generate short-term forecasts from clearly labelled synthetic data.</p>
+          <div class="cta-row">
+            <button class="btn primary" data-route="dashboard">Launch Dashboard</button>
+            <button class="btn" data-route="prediction">View Forecasts</button>
+          </div>
+        </div>
+
+        <div class="stat-strip" style="margin-bottom:22px">
+          <div><b id="homeRoads">—</b><span>Demo road segments</span></div>
+          <div><b id="homeRecords">—</b><span>Synthetic records</span></div>
+          <div><b id="homeDays">—</b><span>Generated data days</span></div>
+          <div><b>6</b><span>Forecast horizons</span></div>
+          <div><b>2</b><span>Model families compared</span></div>
+        </div>
+
+        <div class="notice warn">Prototype notice: traffic readings, road-segment coordinates and forecasts are synthetic examples. This page is not connected to live Calabar traffic or verified GPS sensors.</div>
+
+        <div class="card">
+          <h3>The problem</h3>
+          <p>Urban congestion imposes delay, fuel cost and emissions, yet it is often measured only after it occurs. A system that both <b>detects</b> where congestion is forming and <b>forecasts</b> where it is heading gives planners and drivers time to act.</p>
+          <h3 style="margin-top:18px">The solution</h3>
+          <p>FlowCast combines a traffic dashboard, a prediction module, hotspot analytics, an alert centre and a data-management pipeline. It ships with a seeded synthetic dataset so every screen is functional without a paid traffic API, and isolates any real provider behind an adapter so the core system is never locked to one vendor.</p>
+        </div>
+
+        <div class="card">
+          <h3>Workflow</h3>
+          <div class="steps">
+            <div class="step"><div class="n">1</div><h4>Ingest</h4><p>Load historical traffic records — timestamp, road, speed, volume, occupancy, weather, incidents, events.</p></div>
+            <div class="step"><div class="n">2</div><h4>Engineer</h4><p>Derive lag features, rolling statistics, peak-hour flags and congestion labels from defensible thresholds.</p></div>
+            <div class="step"><div class="n">3</div><h4>Model</h4><p>Compare a baseline against a tree-based model using a chronological split to avoid leakage.</p></div>
+            <div class="step"><div class="n">4</div><h4>Act</h4><p>Surface hotspots, forecasts and alerts on the dashboard, then export results for reporting.</p></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Features</h3>
+          <div class="feature-grid" style="margin-top:12px">
+            <div class="feature"><div class="fi">📊</div><h4>Traffic dashboard</h4><p>KPI cards, an interactive congestion map, filters, a severity legend and a recent-incidents table.</p></div>
+            <div class="feature"><div class="fi">🔮</div><h4>Prediction module</h4><p>Six forecast horizons with probability, expected speed, a confidence indicator and an explanation.</p></div>
+            <div class="feature"><div class="fi">📈</div><h4>Analytics</h4><p>Historical trends, peak-hour and day-of-week patterns, location ranking and feature importance.</p></div>
+            <div class="feature"><div class="fi">🔔</div><h4>Alert centre</h4><p>Threshold alerts, severe-congestion warnings and incident notifications with status and timestamps.</p></div>
+            <div class="feature"><div class="fi">🗂️</div><h4>Data management</h4><p>CSV upload with validation and preview, missing-value and duplicate detection, and CSV export.</p></div>
+            <div class="feature"><div class="fi">🧠</div><h4>Explainable ML</h4><p>Feature-importance explainability, honest metrics and the model version shown for every forecast.</p></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>How FlowCast works</h3>
+          <p class="card-sub">A clear view of the data flow and supporting services. The API and live backend are optional in this prototype.</p>
+          <div class="architecture-diagram" role="group" aria-label="FlowCast architecture and data flow">
+            <div class="architecture-flow">
+              <div class="architecture-node"><small>01 · Input</small><b>Traffic data</b><span>Uploaded records or synthetic demo observations</span></div>
+              <div class="architecture-node"><small>02 · Experience</small><b>Web application</b><span>Dashboard, map, alerts and controls</span></div>
+              <div class="architecture-node"><small>03 · API</small><b>FastAPI service</b><span>Optional backend interface</span></div>
+              <div class="architecture-node"><small>04 · Prepare</small><b>Feature pipeline</b><span>Validate, enrich and split records</span></div>
+              <div class="architecture-node"><small>05 · Learn</small><b>Forecast model</b><span>Baseline and tree-based estimates</span></div>
+              <div class="architecture-node"><small>06 · Result</small><b>Prediction service</b><span>Congestion level, speed and confidence</span></div>
+            </div>
+            <div class="architecture-branches">
+              <p>Supporting services connected through the API</p>
+              <div class="architecture-services">
+                <div class="architecture-service"><b>Traffic database</b><span>Road observations and history</span></div>
+                <div class="architecture-service"><b>Map service</b><span>Road locations and hotspots</span></div>
+                <div class="architecture-service"><b>Alert service</b><span>Thresholds and notifications</span></div>
+                <div class="architecture-service"><b>Analytics</b><span>Trends and model evaluation</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Metrics &amp; honesty</h3>
+          <p>Evaluation metrics are reported for the model actually used on each forecast, and regression and classification metrics are kept separate. In Demo Mode the numbers are computed on synthetic data — they illustrate the workflow and are <b>not</b> claims about real-world accuracy.</p>
+          <p style="margin-bottom:0">Real-world forecasting quality depends entirely on the quality, coverage, timeliness and representativeness of the actual traffic data connected.</p>
+        </div>
+
+        <div class="card faq">
+          <h3>FAQ</h3>
+          <details><summary>Is this connected to live traffic data?</summary><p>No. The default experience runs in Demo Mode on seeded synthetic data. A real traffic provider can be connected later through the adapter layer, keeping API keys server-side.</p></details>
+          <details><summary>Does the demo need a paid API?</summary><p>No. Every module works with the built-in generator, and the chart and map libraries degrade gracefully to local fallbacks if the CDN is unavailable.</p></details>
+          <details><summary>How is the congestion label decided?</summary><p>Labels are derived from the ratio of observed speed to the road's free-flow speed, using fixed thresholds — not arbitrary random assignment.</p></details>
+          <details><summary>Can I export my results?</summary><p>Yes. The Data view exports the processed dataset and analytics results to CSV.</p></details>
+        </div>
+
+        <footer style="text-align:center; padding:26px 0 10px; color:var(--muted2); font-size:.78rem">
+          FlowCast · Traffic Congestion Detection &amp; Prediction System · Demo Mode · Synthetic data only
+        </footer>
+      </section>
+
+      <!-- ============ DASHBOARD ============ -->
+      <section class="view" id="view-dashboard">
+        <div class="grid g-4" style="margin-bottom:16px">
+          <div class="card kpi"><div class="glow"></div><div class="label">Congestion index</div><div class="value" id="kpiIndex">—</div><div class="delta" id="kpiIndexDelta">—</div></div>
+          <div class="card kpi"><div class="label">Average speed</div><div class="value" id="kpiSpeed">—</div><div class="delta" id="kpiSpeedDelta">km/h across monitored roads</div></div>
+          <div class="card kpi"><div class="label">Active incidents</div><div class="value" id="kpiIncidents">—</div><div class="delta" id="kpiIncidentsDelta">last 24 hours</div></div>
+          <div class="card kpi"><div class="label">Predicted risk</div><div class="value" id="kpiRisk">—</div><div class="delta" id="kpiRiskDelta">next 1 hour</div></div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px">
+            <h3 style="margin:0">Filters</h3>
+            <div class="spacer"></div>
+            <button class="btn sm" id="refreshDemo">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+              Refresh demo data
+            </button>
+          </div>
+          <div class="row">
+            <div class="field" style="margin:0"><label for="fltDate">Date</label><input id="fltDate" type="date" /></div>
+            <div class="field" style="margin:0"><label for="fltTime">Time</label><input id="fltTime" type="time" value="08:00" /></div>
+            <div class="field" style="margin:0"><label for="fltRoad">Road</label><select id="fltRoad"><option value="">All roads</option></select></div>
+            <div class="field" style="margin:0"><label for="fltSeverity">Severity</label>
+              <select id="fltSeverity">
+                <option value="">All levels</option>
+                <option>LOW</option><option>MODERATE</option><option>HIGH</option><option>SEVERE</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g-2-1">
+          <div class="card" style="position:relative">
+            <h3>Congestion map</h3>
+            <p class="card-sub">Approximate synthetic monitoring points for Marian Road and Ekpo Abasi Street, Calabar South.</p>
+            <div class="map-wrap"><div id="map"></div></div>
+            <div class="legend" style="margin-top:12px">
+              <span><i style="background:var(--ok)"></i>Low</span>
+              <span><i style="background:var(--warn)"></i>Moderate</span>
+              <span><i style="background:var(--high)"></i>High</span>
+              <span><i style="background:var(--sev)"></i>Severe</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3>Road status</h3>
+            <p class="card-sub">Current snapshot per monitored road.</p>
+            <div id="roadList" class="bar-list"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Recent incidents</h3>
+          <p class="card-sub">Most recent reported incidents in the selected window.</p>
+          <div style="overflow:auto">
+            <table>
+              <thead><tr><th>Time</th><th>Road</th><th>Severity</th><th>Speed</th><th>Status</th></tr></thead>
+              <tbody id="incidentBody"><tr><td colspan="5" style="text-align:center; color:var(--muted2)">No incidents in this window.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PREDICTION ============ -->
+      <section class="view" id="view-prediction">
+        <div class="grid g-2-1">
+          <div class="card">
+            <h3>Forecast inputs</h3>
+            <p class="card-sub">Provide context, then generate a congestion forecast.</p>
+            <form id="predictForm" novalidate>
+              <div class="row">
+                <div class="field" id="f_p_road"><label for="p_road">Location / road</label><select id="p_road"></select><div class="err">Select a road.</div></div>
+                <div class="field" id="f_p_date"><label for="p_date">Date</label><input id="p_date" type="date" /><div class="err">Select a date.</div></div>
+              </div>
+              <div class="row">
+                <div class="field" id="f_p_time"><label for="p_time">Time</label><input id="p_time" type="time" value="08:30" /><div class="err">Select a time.</div></div>
+                <div class="field" id="f_p_horizon"><label for="p_horizon">Forecast horizon</label>
+                  <select id="p_horizon">
+                    <option value="15">15 minutes</option><option value="30">30 minutes</option>
+                    <option value="60" selected>1 hour</option><option value="120">2 hours</option>
+                    <option value="360">6 hours</option><option value="1440">24 hours</option>
+                  </select>
+                </div>
+              </div>
+              <div class="row">
+                <div class="field" id="f_p_weather"><label for="p_weather">Weather</label>
+                  <select id="p_weather">
+                    <option value="clear">Clear</option><option value="rain">Rain</option>
+                    <option value="heavy_rain">Heavy rain</option><option value="fog">Fog</option>
+                  </select>
+                </div>
+                <div class="field" id="f_p_dow"><label for="p_dow">Day of week</label>
+                  <select id="p_dow">
+                    <option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option>
+                    <option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option><option value="0">Sunday</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field" id="f_p_event">
+                <label style="display:flex; align-items:center; gap:8px; font-weight:400">
+                  <input id="p_event" type="checkbox" style="width:auto" /> Event nearby (match, concert, roadworks)
+                </label>
+              </div>
+              <button type="submit" class="btn primary" style="width:100%; justify-content:center" id="p_submit">Generate forecast</button>
+            </form>
+          </div>
+
+          <div class="card" style="position:relative" id="predictResultCard">
+            <h3>Forecast result</h3>
+            <p class="card-sub" id="predictStamp">Awaiting input…</p>
+            <div id="predictResult">
+              <div class="chart-empty" style="height:200px">Run a forecast to see the predicted congestion level, probability and expected speed.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Forecast across horizons</h3>
+          <p class="card-sub">Predicted speed by horizon for the selected road and time.</p>
+          <div class="chart-wrap"><canvas id="horizonChart"></canvas></div>
+        </div>
+      </section>
+
+      <!-- ============ ANALYTICS ============ -->
+      <section class="view" id="view-analytics">
+        <div class="grid g-2">
+          <div class="card">
+            <h3>Historical congestion trend</h3>
+            <p class="card-sub">Mean congestion index by day.</p>
+            <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+          </div>
+          <div class="card">
+            <h3>Peak-hour analysis</h3>
+            <p class="card-sub">Mean congestion index by hour of day.</p>
+            <div class="chart-wrap"><canvas id="hourChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="grid g-2">
+          <div class="card">
+            <h3>Day-of-week pattern</h3>
+            <p class="card-sub">Mean congestion index by weekday.</p>
+            <div class="chart-wrap"><canvas id="dowChart"></canvas></div>
+          </div>
+          <div class="card">
+            <h3>Feature importance</h3>
+            <p class="card-sub">Relative influence on the demo model's prediction.</p>
+            <div id="importanceList" class="bar-list" style="margin-top:8px"></div>
+          </div>
+        </div>
+
+        <div class="grid g-2">
+          <div class="card">
+            <h3>Location ranking</h3>
+            <p class="card-sub">Roads ordered by mean congestion index.</p>
+            <div id="rankList" class="bar-list"></div>
+          </div>
+          <div class="card">
+            <h3>Prediction vs actual</h3>
+            <p class="card-sub">Demo model evaluated on a chronological hold-out split.</p>
+            <div class="chart-wrap"><canvas id="pvaChart"></canvas></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Evaluation metrics</h3>
+          <p class="card-sub">Regression metrics for speed, classification metrics for congestion level — computed on synthetic demo data.</p>
+          <div class="grid g-4" id="metricCards"></div>
+        </div>
+      </section>
+
+      <!-- ============ ALERTS ============ -->
+      <section class="view" id="view-alerts">
+        <div class="card">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+            <div>
+              <h3 style="margin:0">Alert centre</h3>
+              <p class="card-sub" style="margin:4px 0 0">Threshold breaches, severe-congestion warnings and incident notifications.</p>
+            </div>
+            <div class="spacer"></div>
+            <button class="btn sm" id="testAlert">Send test alert</button>
+            <button class="btn sm" id="clearAlerts">Clear resolved</button>
+          </div>
+        </div>
+
+        <div class="grid g-4" style="margin-bottom:16px">
+          <div class="card kpi"><div class="label">Open alerts</div><div class="value" id="alertOpen">—</div></div>
+          <div class="card kpi"><div class="label">Severe warnings</div><div class="value" id="alertSevere">—</div></div>
+          <div class="card kpi"><div class="label">Incident notices</div><div class="value" id="alertIncident">—</div></div>
+          <div class="card kpi"><div class="label">Resolved</div><div class="value" id="alertResolved">—</div></div>
+        </div>
+
+        <div class="card">
+          <h3>Active alerts</h3>
+          <div style="overflow:auto">
+            <table>
+              <thead><tr><th>Raised</th><th>Type</th><th>Road</th><th>Message</th><th>Status</th><th></th></tr></thead>
+              <tbody id="alertBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Alert thresholds</h3>
+          <p class="card-sub">Alerts fire when the congestion index crosses these levels.</p>
+          <div class="row">
+            <div class="field" style="margin:0"><label for="thHigh">High threshold (index)</label><input id="thHigh" type="number" step="0.01" value="0.55" /></div>
+            <div class="field" style="margin:0"><label for="thSevere">Severe threshold (index)</label><input id="thSevere" type="number" step="0.01" value="0.75" /></div>
+            <div class="field" style="margin:0; display:flex; align-items:flex-end"><button class="btn" id="saveThresholds" style="width:100%; justify-content:center">Save thresholds</button></div>
+          </div>
+          <div class="notice" style="margin-top:8px">Notification delivery is UI-only in Demo Mode. Connect a messaging provider to send real alerts.</div>
+        </div>
+      </section>
+
+      <!-- ============ DATA ============ -->
+      <section class="view" id="view-data">
+        <div class="grid g-2-1">
+          <div class="card">
+            <h3>Upload traffic CSV</h3>
+            <p class="card-sub">Expected columns: timestamp, road_id, latitude, longitude, speed_kmh, traffic_volume, occupancy, rainfall_mm, incident_count, event_flag.</p>
+            <div class="field">
+              <label for="csvFile">Select CSV file</label>
+              <input id="csvFile" type="file" accept=".csv,text/csv" />
+            </div>
+            <div class="row">
+              <button class="btn" id="btnValidate" disabled>Validate</button>
+              <button class="btn primary" id="btnIngest" disabled>Ingest into demo store</button>
+            </div>
+            <div id="uploadStatus" style="margin-top:14px"></div>
+          </div>
+
+          <div class="card">
+            <h3>Pipeline stages</h3>
+            <p class="card-sub">Dataset split used by the demo pipeline.</p>
+            <div id="splitList" class="bar-list"></div>
+            <div class="notice" style="margin-top:14px">Splits are chronological for forecasting — the model never trains on future rows.</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Data preview</h3>
+          <p class="card-sub" id="previewSub">First rows of the active dataset.</p>
+          <div style="overflow:auto; max-height:340px">
+            <table id="previewTable"><thead></thead><tbody></tbody></table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+            <div><h3 style="margin:0">Export</h3><p class="card-sub" style="margin:4px 0 0">Download processed data and analytics results.</p></div>
+            <div class="spacer"></div>
+            <button class="btn sm" id="exportRaw">Export raw CSV</button>
+            <button class="btn sm" id="exportProcessed">Export processed CSV</button>
+            <button class="btn sm" id="exportMetrics">Export metrics CSV</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ DOCS ============ -->
+      <section class="view" id="view-docs">
+        <div class="card">
+          <h3>Overview</h3>
+          <p>FlowCast is a full-stack SaaS prototype for traffic congestion detection, hotspot analytics and short-term forecasting. The standalone frontend is provided by <code>index.html</code> and <code>script.js</code>; the optional backend exposes FastAPI JSON endpoints and runs the ML pipeline.</p>
+          <div class="notice">Demo Mode is the default: seeded synthetic data powers every screen, and no paid API is required. Real traffic feeds are connected through an adapter so the core system stays vendor-neutral.</div>
+        </div>
+
+        <div class="card">
+          <h3>Architecture</h3>
+          <p class="card-sub">The backend is optional; the frontend runs on synthetic demo data when it is not configured.</p>
+          <div class="architecture-diagram" role="group" aria-label="FlowCast architecture and data flow">
+            <div class="architecture-flow">
+              <div class="architecture-node"><small>01 · Input</small><b>Traffic data</b><span>Uploaded records or synthetic demo observations</span></div>
+              <div class="architecture-node"><small>02 · Experience</small><b>Web application</b><span>Dashboard, map, alerts and controls</span></div>
+              <div class="architecture-node"><small>03 · API</small><b>FastAPI service</b><span>Optional backend interface</span></div>
+              <div class="architecture-node"><small>04 · Prepare</small><b>Feature pipeline</b><span>Validate, enrich and split records</span></div>
+              <div class="architecture-node"><small>05 · Learn</small><b>Forecast model</b><span>Baseline and tree-based estimates</span></div>
+              <div class="architecture-node"><small>06 · Result</small><b>Prediction service</b><span>Congestion level, speed and confidence</span></div>
+            </div>
+            <div class="architecture-branches">
+              <p>Supporting services connected through the API</p>
+              <div class="architecture-services">
+                <div class="architecture-service"><b>Traffic database</b><span>Road observations and history</span></div>
+                <div class="architecture-service"><b>Map service</b><span>Road locations and hotspots</span></div>
+                <div class="architecture-service"><b>Alert service</b><span>Thresholds and notifications</span></div>
+                <div class="architecture-service"><b>Analytics</b><span>Trends and model evaluation</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>API endpoints</h3>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/health</code><span style="color:var(--muted2)">Service health check</span></div>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/dashboard/summary</code><span style="color:var(--muted2)">KPI cards</span></div>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/traffic/current</code><span style="color:var(--muted2)">Current snapshot</span></div>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/traffic/history</code><span style="color:var(--muted2)">Historical records</span></div>
+          <div class="endpoint"><span class="verb POST">POST</span><code>/api/predict</code><span style="color:var(--muted2)">Single forecast</span></div>
+          <div class="endpoint"><span class="verb POST">POST</span><code>/api/predict/batch</code><span style="color:var(--muted2)">Batch forecasts</span></div>
+          <div class="endpoint"><span class="verb POST">POST</span><code>/api/data/upload</code><span style="color:var(--muted2)">CSV ingestion</span></div>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/analytics/trends</code><span style="color:var(--muted2)">Trend aggregates</span></div>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/analytics/hotspots</code><span style="color:var(--muted2)">Hotspot ranking</span></div>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/models</code><span style="color:var(--muted2)">Model registry</span></div>
+          <div class="endpoint"><span class="verb GET">GET</span><code>/api/alerts</code><span style="color:var(--muted2)">Alert feed</span></div>
+          <div class="endpoint"><span class="verb POST">POST</span><code>/api/alerts/test</code><span style="color:var(--muted2)">Test notification</span></div>
+        </div>
+
+        <div class="card">
+          <h3>Prediction response shape</h3>
+          <pre>{
+  "location": "Road A",
+  "forecast_time": "2026-10-05T08:30:00",
+  "predicted_congestion": "HIGH",
+  "probability": 0.87,
+  "expected_speed_kmh": 24.5,
+  "confidence": 0.81,
+  "model": "gradient_boosting_v1"
+}</pre>
+        </div>
+
+        <div class="card">
+          <h3>Running Demo Mode</h3>
+          <p>No build step or backend is required for the frontend. Serve the project folder with VS Code Live Server, create an account, and sign in to use every module against the built-in generator.</p>
+          <pre># Backend (optional, for real predictions)
+python -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+# Point the frontend at the backend
+localStorage.setItem('flowcast.apiBase','http://localhost:8000')</pre>
+        </div>
+
+        <div class="card">
+          <h3>Connecting a real traffic API</h3>
+          <p>Implement a provider class that normalises external records into the internal schema, keep API keys server-side, and expose the result through the existing endpoints. The frontend never holds a secret — it only talks to your API.</p>
+          <pre>class TrafficDataProvider:
+    def fetch(self, road_id, window):
+        """Return normalised records matching the internal schema."""
+        raise NotImplementedError</pre>
+        </div>
+
+        <div class="card">
+          <h3>Administration &amp; account roles</h3>
+          <p>This prototype does not include an admin dashboard or administrator permissions. New accounts are local analyst accounts; the role label is not enforced by a server. Do not use browser-side roles to protect real user or operational data.</p>
+          <p style="margin-bottom:0">A production admin area requires backend authentication, server-enforced role checks, a controlled way to grant/revoke admin access, and audit logging.</p>
+        </div>
+
+        <div class="card">
+          <h3>Security notes</h3>
+          <ul style="color:var(--muted); font-size:.87rem">
+            <li>Authentication in this file is a <b>client-side demo</b> so the prototype runs with no backend. It is not production-grade.</li>
+            <li>In production, move auth to the backend: hash passwords with a salted algorithm such as bcrypt or Argon2, issue short-lived tokens, and validate every request server-side.</li>
+            <li>Never place API keys or secrets in frontend code — load them from environment variables on the server.</li>
+            <li>Validate and sanitise all uploaded filenames and data, enable CORS only for known origins, and add rate-limiting middleware.</li>
+          </ul>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
+<div id="modalRoot"></div>
+
+<!-- Optional external libraries (graceful fallbacks exist if these fail to load) -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" defer></script>
+
+<script src="script.js" defer></script>
+</body>
+</html>
